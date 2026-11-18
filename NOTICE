@@ -1,0 +1,23 @@
+# 第三方组件与修改说明
+
+## proteus-automatic-api 0.2.0
+
+`vendor/ref844/` 下的代码来自 **proteus-automatic-api 0.2.0**，
+MIT 许可，版权归 proteus-automatic-api contributors。
+原始许可证见 `vendor/ref844/proteus_automatic_api-0.2.0.dist-info/licenses/LICENSE`。
+
+### 本项目对它的唯一修改
+
+`vendor/ref844/wire_codec.py` 的 `_junction_records()` 中，
+**放开"星形分支不得重叠"的检查**（原检查用 `_need(...)` 硬失败）。
+
+原因：原实现禁止分支重叠，导致"一根竖干挂多个抽头"这种最标准的原理图画法
+无法表达，只能退化成绕来绕去的折线 —— 电气对，但图读不懂。
+Proteus 本身对重叠导线是容忍的（画面上就是一根线），已实测。
+
+恢复原行为：把该处的 `if False:` 改回 `_need(...)` 即可，代码里有注释标明位置。
+
+## 图片来源
+
+仓库**不包含**任何教材扫描图。`tests/encoder_source.png` 需要使用者自备
+（放一张编码器电路图进去即可跑相关测试）。依赖它的测试在缺图时会自动跳过。

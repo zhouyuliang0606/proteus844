@@ -1,0 +1,4 @@
+﻿# 仓库结构
+
+`proteus844/` 是包本体（可 import proteus844），根目录放 README / LICENSE / NOTICE。
+用法见 [README.md](README.md)，给别人/子代理用的任务书见 [proteus844/BRIEF.md](proteus844/BRIEF.md)。
