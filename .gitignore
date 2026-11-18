@@ -1,0 +1,15 @@
+﻿__pycache__/
+*.pyc
+
+# Proteus 打开工程时生成的临时文件
+Project Backups/
+*.ASV
+*.workspace
+
+# 版权原因：教材扫描图不入库
+proteus844/tests/encoder_source.png
+
+# 本地产物
+out/
+dist/
+_*
