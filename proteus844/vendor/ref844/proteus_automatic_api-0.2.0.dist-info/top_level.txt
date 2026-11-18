@@ -1,0 +1,15 @@
+clone_research
+component_codec
+connectivity_research
+device_library
+interactive_native
+measurements
+net_edit
+net_objects
+pin_geometry
+proteus_automatic_api
+proteus_native
+proteus_project
+proteus_session
+simulation
+wire_codec

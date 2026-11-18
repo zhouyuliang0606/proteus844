@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pdsprj
+*.SDF
+*.png
+!BRIEF.md
+Project Backups/
+*.ASV
+*.workspace
+tests/encoder_source.png

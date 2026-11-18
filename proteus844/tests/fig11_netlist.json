@@ -1,0 +1,28 @@
+{
+  "title": "图 1.1 组合逻辑电路 F(A,B,C)=AB+BC+CA（三取二多数表决）",
+  "source": "textbook fig.1.1 (PNG 479x266, sha256 7386e093e8845021193ae85a9e664f6a2c978631e400cd0f8412f1717f36d240)",
+  "components": [
+    {"ref": "LS1",     "device": "LOGICSTATE", "value": "0",       "x": -40, "y":  10, "rotation": 0},
+    {"ref": "LS2",     "device": "LOGICSTATE", "value": "0",       "x": -40, "y":   1, "rotation": 0},
+    {"ref": "LS3",     "device": "LOGICSTATE", "value": "0",       "x": -40, "y":  -8, "rotation": 0},
+    {"ref": "U1:D",    "device": "7400",       "value": "7400",    "x": -24, "y":   9, "rotation": 0},
+    {"ref": "U3:A",    "device": "7400",       "value": "7400",    "x": -24, "y":   0, "rotation": 0},
+    {"ref": "U3:B",    "device": "7400",       "value": "7400",    "x": -24, "y":  -9, "rotation": 0},
+    {"ref": "U4:A",    "device": "7410",       "value": "7410",    "x":  -8, "y":   2, "rotation": 0},
+    {"ref": "R14",     "device": "RES",        "value": "100",     "x":   4, "y":   0, "rotation": 0},
+    {"ref": "D2",      "device": "LED-RED",    "value": "LED-RED", "x":  10, "y":  -2, "rotation": 0}
+  ],
+  "nets": [
+    {"name": "A",          "pins": [["LS1", "Q0"], ["U1:D", "A"], ["U3:B", "B"]]},
+    {"name": "B",          "pins": [["LS2", "Q0"], ["U1:D", "B"], ["U3:A", "A"]]},
+    {"name": "C",          "pins": [["LS3", "Q0"], ["U3:A", "B"], ["U3:B", "A"]]},
+    {"name": "N_AB",       "pins": [["U1:D", "Y"], ["U4:A", "A"]]},
+    {"name": "N_BC",       "pins": [["U3:A", "Y"], ["U4:A", "B"]]},
+    {"name": "N_CA",       "pins": [["U3:B", "Y"], ["U4:A", "C"]]},
+    {"name": "F(A,B,C)",   "pins": [["U4:A", "Y"], ["R14", "1"]]},
+    {"name": "N_LED",      "pins": [["R14", "2"], ["D2", "A"]]}
+  ],
+  "terminals": [
+    {"kind": "ground", "name": "GND", "pin": ["D2", "K"]}
+  ]
+}
