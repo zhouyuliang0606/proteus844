@@ -1,12 +1,10 @@
 """生成 CLI 回归用的夹具（结点 / 引脚尖 / 包围盒），并跑一遍 CLI。"""
 import json
+import os
 import subprocess
 import sys
 
 J = D = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if "import os" not in s.split(chr(10))[0]:
-    s = "import os
-" + s
 
 juncs = [{"x": 97.0, "y": 53.0}, {"x": 113.5, "y": 125.0},
          {"x": 115.5, "y": 205.0}, {"x": 363.5, "y": 135.0}]
