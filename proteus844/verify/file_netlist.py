@@ -52,7 +52,7 @@ def _cdb_pin_names(cdb, ref):
     return names
 
 
-def rebuild(project):
+def rebuild(project, with_wire_net=False):
     """返回 (components, wires, nets) —— nets 是 {frozenset((ref,pin))}"""
     buf = reader.load(project)
     with zipfile.ZipFile(project) as z:
@@ -107,7 +107,17 @@ def rebuild(project):
         groups[dsu.find(node)].add((ref, name))
     # 保留单引脚网：电源脚没接线时这里必须看得见（否则会掩盖"一个电源符号都没画"）
     nets = [frozenset(v) for v in groups.values() if v]
-    return recs, wires, nets
+    if not with_wire_net:
+        return recs, wires, nets
+    # 每根线属于哪个网 —— check_overlap 需要这个映射
+    comp_pins = {}
+    for node, ref, name in pins:
+        comp_pins.setdefault(dsu.find(node), set()).add((ref, name))
+    wire_net = {}
+    for start in wires:
+        ps = comp_pins.get(dsu.find(("w", start)), set())
+        wire_net[start] = ",".join(sorted(f"{r}.{p}" for r, p in ps)) or "?"
+    return recs, wires, nets, wire_net
 
 
 def check_terminals(netlist, project):
