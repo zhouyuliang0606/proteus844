@@ -197,15 +197,18 @@ def cmd_draw(args):
 def cmd_assemble(args):
     from proteus844 import pipeline
     comps = json.load(open(args.components, encoding="utf-8-sig"))
-    nets = json.load(open(args.netlist, encoding="utf-8-sig"))
-    if isinstance(nets, dict):
-        nets = nets.get("nets", [])
+    raw = json.load(open(args.netlist, encoding="utf-8-sig"))
+    if isinstance(raw, dict):
+        nets = raw.get("nets", [])
+        terms = raw.get("terminals") or []          # ★ 之前硬写成 []，GND/VCC 会被吞
+    else:
+        nets, terms = raw, []
     donor = args.donor or DEFAULT_DONOR
     # 没有坐标 = 只给了拓扑 → 自动布局路线
     if comps and all("x" not in c and "pins" not in c for c in comps):
         print("器件没有坐标，走自动布局（拓扑 → 工程）")
         res = pipeline.build_from_topology(
-            {"components": comps, "nets": nets, "terminals": []}, donor, args.out)
+            {"components": comps, "nets": nets, "terminals": terms}, donor, args.out)
         return 0 if res.get("ok") else 1
     ppg = args.ppg or pipeline.estimate_ppg(comps, donor)
     print(f"px_per_grid = {ppg}{'（自动推算）' if not args.ppg else ''}")

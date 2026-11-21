@@ -13,9 +13,55 @@ def _vendor():
     return v
 
 
+def _check_geometry(netlist, plan_doc):
+    """写之前先验证：坐标必须**整格**，导线端点必须落在**引脚或端子上**。
+
+    这条是给"图看着像接上了、其实差半格"兜底的 —— 半格偏差在 Proteus 里
+    就是一根线悬在引脚旁边 0.5 格，人一眼就看出没接上。
+    宁可报错，也不要悄悄画出一张错的图。
+    """
+    problems = []
+    for comp in netlist["components"]:
+        for axis in ("x", "y"):
+            v = comp.get(axis)
+            if v is None:
+                continue
+            if abs(v - round(v)) > 1e-6:
+                problems.append(f"器件 {comp['ref']} 的 {axis}={v} 不在整格上")
+
+    # 合法端点 = 引脚尖端 + 端子接点
+    legal = set()
+    for comp in netlist["components"]:
+        pin_at = comp.get("pins") or {}
+        for _, xy in pin_at.items():
+            legal.add((round(comp["x"] + xy[0], 3), round(comp["y"] + xy[1], 3)))
+    for t in netlist.get("terminals") or []:
+        pos = t.get("position")
+        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            legal.add((round(pos[0], 3), round(pos[1], 3)))
+
+    if legal:                                  # 没有引脚表就跳过这条（无法判定）
+        for n in (plan_doc or {}).get("nets", []):
+            pts = []
+            if n.get("path"):
+                pts += [n["path"][0], n["path"][-1]]
+            for b in n.get("branches") or []:
+                bpts = b.get("points") or []
+                if bpts:
+                    pts += [bpts[0], bpts[-1]]
+            for p in pts:
+                key = (round(p[0], 3), round(p[1], 3))
+                if key not in legal:
+                    problems.append(f"网 {n.get('name')} 的端点 {key} 不在任何引脚/端子上")
+    if problems:
+        raise ValueError("几何校验不通过：\n  " + "\n  ".join(problems[:12]))
+
+
 def build(netlist, plan_doc, donor, out):
     _vendor()
     from component_codec import Circuit
+
+    _check_geometry(netlist, plan_doc)
 
     c = Circuit(donor)
     # 布线器可能挪过器件：以计划里的坐标为最终准
@@ -39,6 +85,19 @@ def build(netlist, plan_doc, donor, out):
               value=str(comp.get("value") or comp["device"]),
               x=int(round(comp["x"] * G)), y=int(round(comp["y"] * G)),
               rotation=int(comp.get("rotation", 0)))
+
+    # 位号/数值文字偏移：R14 竖放时"100"会压在电阻身上，用 label_offsets 挪开。
+    # 单位是格，写进 vendor 的 update。
+    for comp in netlist["components"]:
+        off = comp.get("label_offsets")
+        if not off:
+            continue
+        try:
+            c.update(comp["ref"], label_offsets={
+                k: (int(round(v[0] * G)), int(round(v[1] * G)))
+                for k, v in off.items() if isinstance(v, (list, tuple)) and len(v) >= 2})
+        except Exception as exc:                   # noqa: BLE001
+            terminal_errors.append({"label_offsets": comp.get("ref"), "error": str(exc)})
 
     routes = {n["name"]: n for n in (plan_doc or {}).get("nets", [])}
     # ★ Proteus 要求导线从"器件列表里更靠前"的那一端开始记录，否则几何会被画歪
@@ -92,12 +151,27 @@ def build(netlist, plan_doc, donor, out):
                     for b in r["branches"]]
         c.set_star(branches)
 
+    # 电源/地端子：**保持最朴素的写法** —— add_terminal(kind, name, pin=...)，
+    # 位置交给 vendor 自己算（引脚外 2 格），它会自动补一根连线。
+    # 试过两个"改进"，都会让端子脱离电源网（引擎编译后那根脚变成孤立单脚网）：
+    #   · position=引脚坐标（符号压在引脚上）→ 不连
+    #   · 自己追加 connection 到 @TERMINAL_xx        → 也不连
+    # 实测：朴素写法下 GND 是 6 脚（含 D2.K），改进后只有 5 脚。
     terminal_errors = []
     for t in netlist.get("terminals", []):
         try:
             c.add_terminal(t["kind"], t["name"], pin=tuple(t["pin"]))
-        except Exception as exc:                   # 不静默：收集起来返回
-            terminal_errors.append({"terminal": t, "error": f"{type(exc).__name__}: {exc}"})
+        except Exception as exc:                   # noqa: BLE001
+            terminal_errors.append({"terminal": t,
+                                    "error": f"{type(exc).__name__}: {exc}"})
+
+    # 连线标号（A/B/C/F）：**不可用，且会损坏文件**。
+    # 试过按 Proteus 真实记录手工拼字节（见 build/wirelabel.py）：
+    # 写出的工程能存盘，但 Proteus 打开后不认（画面空白、网络表编译失败）。
+    # 结论：这条记录还差关键字段没解析出来。**默认禁用**，传 labels 只报警告。
+    if (plan_doc or {}).get("labels"):
+        terminal_errors.append({"label": "unsupported",
+                                "error": "连线标号会让工程损坏，已禁用（见 SKILL §3.8）"})
 
     c.save(out, overwrite=True)
     return {"path": out, "terminal_errors": terminal_errors,

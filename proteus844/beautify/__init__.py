@@ -36,7 +36,7 @@ def _rot(dx, dy, ddx, ddy, ang):
 
 def component_extent(comp, donor):
     """器件的实际占位（含符号本体），返回 (x0, y0, x1, y1) 格。"""
-    ang = int(comp.get("rotation", 0))
+    ang = int(comp.get("rotation", 0)) // 10
     cx, cy = float(comp["x"]), float(comp["y"])
     try:
         pins = _pins(donor, comp["device"])
@@ -79,22 +79,24 @@ def center(doc, donor, target=(0.0, 0.0)):
     if box is None:
         return (0.0, 0.0)
     x0, y0, x1, y1 = box
-    dx = round(target[0] - (x0 + x1) / 2, 1)
-    dy = round(target[1] - (y0 + y1) / 2, 1)
+    # 平移量必须取整格：器件坐标本来是整格，只要平移是整数就还是整格。
+    # 取 0.5/0.1 这种小数会把整张图挪到栅格外，导线全都跟着歪。
+    dx = round(target[0] - (x0 + x1) / 2)
+    dy = round(target[1] - (y0 + y1) / 2)
     if dx == 0 and dy == 0:
         return (0.0, 0.0)
     for c in doc.get("components") or []:
         if "x" in c and "y" in c:
-            c["x"] = round(float(c["x"]) + dx, 1)
-            c["y"] = round(float(c["y"]) + dy, 1)
+            c["x"] = round(float(c["x"]) + dx)
+            c["y"] = round(float(c["y"]) + dy)
     for n in doc.get("nets") or []:
         if n.get("path"):
-            n["path"] = [[round(p[0] + dx, 1), round(p[1] + dy, 1)] for p in n["path"]]
+            n["path"] = [[round(p[0] + dx, 2), round(p[1] + dy, 2)] for p in n["path"]]
         for b in n.get("branches") or []:
-            b["points"] = [[round(p[0] + dx, 1), round(p[1] + dy, 1)] for p in b["points"]]
+            b["points"] = [[round(p[0] + dx, 2), round(p[1] + dy, 2)] for p in b["points"]]
         if n.get("junction"):
-            n["junction"] = [round(n["junction"][0] + dx, 1),
-                             round(n["junction"][1] + dy, 1)]
+            n["junction"] = [round(n["junction"][0] + dx, 2),
+                             round(n["junction"][1] + dy, 2)]
     if doc.get("terminals"):
         for t in doc["terminals"]:
             if isinstance(t.get("position"), (list, tuple)):

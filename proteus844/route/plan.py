@@ -11,6 +11,7 @@
   两脚网: {"name","junction":null,"path":[[x,y],...],"pins":[[ref,pin],...]}
   多脚网: {"name","junction":[x,y],"branches":[{"pin":[ref,pin],"points":[...]}]}
 """
+import collections
 from collections import defaultdict
 
 STUB = 1                      # 出线段长度（格）
@@ -39,7 +40,10 @@ def _symbol_pins(donor, device):
     for p in c.pins(ref):
         x, y = p["position"]
         d = p.get("direction") or (0, 0)
-        out[p["name"]] = (round(x / G), round(y / G), int(d[0]), int(d[1]))
+        # ★ 不要取整到整格！有的符号引脚本来就在半格上
+        #   （7SEG-COM-CATHODE 的 COM 是 -10.5 格）。取整会让导线落在
+        #   引脚旁边 0.5 格 —— Proteus 里看着就是"线没接上"。
+        out[p["name"]] = (round(x / G, 2), round(y / G, 2), int(d[0]), int(d[1]))
     cache[(donor, device)] = out
     _symbol_pins._c = cache
     return out
@@ -132,10 +136,13 @@ def _hit_foreign(path, blocked):
     return None
 
 
-def _route_2pin(a, da, b, db, k=0, blocked=frozenset()):
+def _route_2pin(a, da, b, db, k=0, blocked=frozenset(), stub_choices=None):
     """k = 走廊偏移。返回 (path) 或 None。
-    need = (a_stub, b_stub, a_stub2, b_stub2) 由 plan() 传入，一般不用。"""
-    for stub in (STUB, 0):
+
+    stub_choices: 试哪些出线桩长。默认 (STUB, 0)。
+    调用方在"桩点被别的网占用"时需要显式指定 0，否则永远拿不到不出桩的方案。
+    """
+    for stub in (stub_choices if stub_choices is not None else (STUB, 0)):
         p1 = (a[0] + da[0] * stub, a[1] + da[1] * stub) if (da != (0, 0) and stub) else a
         p2 = (b[0] + db[0] * stub, b[1] + db[1] * stub) if (db != (0, 0) and stub) else b
         cands = []
@@ -290,11 +297,26 @@ def _declutter(out, tips, max_rounds=8):
     return fixed
 
 
+_DBG = __import__("os").environ.get("PLAN_DEBUG")
+
+
 def plan(netlist, donor, min_spacing=2):
     OVERLAP_WARN.clear()
     separate_pins(netlist, donor)          # 先把挨太近的引脚推开，否则可能无解
     tips = pin_table(netlist, donor)
     all_pins = {(int(t[0]), int(t[1])) for t in tips.values()}
+    # 每个引脚的**必经出线点**（沿朝向走 STUB 格）。别人不许穿过 ——
+    # 否则那条网的第一步就被占死，整条网无解（压测 15% 失败就是这原因）。
+    stub_owner = collections.defaultdict(set)
+    pin_tail = collections.defaultdict(set)   # 引脚线内侧：任何网都不许走
+    for pin, t in tips.items():
+        dx, dy = int(t[2]), int(t[3])
+        if (dx, dy) != (0, 0):
+            stub_owner[(int(t[0]) + dx * STUB, int(t[1]) + dy * STUB)].add(tuple(pin))
+            # 引脚线本身（引脚头往里 1~3 格）也不许别人踩 ——
+            # 否则会出现"导线沿着引脚线走"，看着像连在整根引脚上（实测 LS1 就是这样）
+            for k in (1, 2, 3):
+                pin_tail[(int(t[0]) - dx * k, int(t[1]) - dy * k)].add(tuple(pin))
     used_ch, out = [], []
     used_segs = []            # [(netname, p, q)] —— 已占用线段
 
@@ -308,6 +330,47 @@ def plan(netlist, donor, min_spacing=2):
     def claim(name, path):
         for p, q in zip(path, path[1:]):
             used_segs.append((name, tuple(p), tuple(q)))
+
+    def hits_foreign_stub(path, pins):
+        """1) 不许踩别人引脚的出线桩；2) 引脚线内侧谁都不许走。"""
+        mine = {tuple(p) for p in pins}
+        for v in path:
+            key = (int(v[0]), int(v[1]))
+            if key in pin_tail:              # 压在引脚线上（含自己的网）
+                return True
+            owners = stub_owner.get(key)
+            if owners and not owners <= mine:
+                return True
+        return False
+
+    def crossings_of(path, name):
+        """候选路径会与多少条**别的网**的线段正交相交（交点在双方内部）。
+
+        原来这里只找"第一个不冲突的走廊"就 break，完全不管交叉 ——
+        22 器件的编码器因此有 66 处交叉，读者根本追不动线。
+        """
+        n = 0
+        for p, q in zip(path, path[1:]):
+            h1 = p[1] == q[1]
+            for nm, r, s in used_segs:
+                if nm == name:
+                    continue
+                h2 = r[1] == s[1]
+                if h1 == h2:
+                    continue                       # 平行，不会交叉
+                if h1:
+                    hy, x0, x1 = p[1], min(p[0], q[0]), max(p[0], q[0])
+                    vx, y0, y1 = r[0], min(r[1], s[1]), max(r[1], s[1])
+                else:
+                    hy, x0, x1 = r[1], min(r[0], s[0]), max(r[0], s[0])
+                    vx, y0, y1 = p[0], min(p[1], q[1]), max(p[1], q[1])
+                if x0 < vx < x1 and y0 < hy < y1:
+                    n += 1
+        return n
+
+    def length_of(path):
+        return sum(abs(p[0] - q[0]) + abs(p[1] - q[1])
+                   for p, q in zip(path, path[1:]))
 
     jobs = []
     for net in netlist.get("nets", []):
@@ -356,11 +419,12 @@ def plan(netlist, donor, min_spacing=2):
                         for v in cand
                         for nm, r, t_ in used_segs if nm != job["name"]):
                     path = cand
-            # 车道优先：扇出已经算好了专属车道，就别再让通用走廊覆盖它。
-            # 之前这里无条件跑 CORRIDORS，算好的车道被覆盖，
-            # 1 格栅距的扇出会贴着相邻脚行跑、堵死后面的网（子代实测：N18 无解）。
+            # 走廊选择：按"交叉数 × 3 + 线长 × 0.15"打分，取最低的。
+            # 旧逻辑是「第一个不冲突的就用」，交叉数完全没被约束。
             best, best_cost = None, None
+            fallback, fb_cost, fb_why = None, None, None
             if path is None:
+                # 第一轮：常规走廊，按"交叉×3 + 线长×0.15"取最好的。
                 for k in CORRIDORS:
                     cand = _route_2pin(a[:2], a[2:], b[:2], b[2:], k=k)
                     if cand is None:
@@ -368,32 +432,96 @@ def plan(netlist, donor, min_spacing=2):
                     shared = any(tuple(v) in (r, t_)
                                  for v in cand
                                  for nm, r, t_ in used_segs if nm != job["name"])
-                    clash = conflicts(cand)
-                    if clash is None and not shared:
-                        path, why = cand, None
-                        break
+                    if not shared and hits_foreign_stub(cand, pins):
+                        shared = True
+                        if _DBG:
+                            print(f"[plan] {job['name']} k={k} 穿过别人出线桩: {cand}")
                     if shared:
-                        why = "共端点"
+                        # 桩点被别人占了 —— 退到"不出桩"再试，否则这条网直接无解
+                        cand0 = _route_2pin(a[:2], a[2:], b[:2], b[2:], k=k,
+                                            stub_choices=(0,))
+                        if cand0 is not None:
+                            shared0 = any(tuple(v) in (r, t_)
+                                          for v in cand0
+                                          for nm, r, t_ in used_segs if nm != job["name"])
+                            if not shared0:
+                                clash0 = conflicts(cand0)
+                                if clash0 is None:
+                                    cost0 = (crossings_of(cand0, job["name"]) * 3.0
+                                             + length_of(cand0) * 0.15)
+                                    if best_cost is None or cost0 < best_cost:
+                                        best, best_cost, why = cand0, cost0, None
+                                    continue
+                        if _DBG:
+                            owners = {(r, t_, nm) for v in cand for nm, r, t_ in used_segs
+                                      if nm != job["name"] and (tuple(v) == r or tuple(v) == t_)}
+                            print(f"[plan] {job['name']} k={k} shared 于 {owners}")
+                        continue                    # 和别的网共用端点 → 等于误连
+                    clash = conflicts(cand)
+                    if clash is not None:
+                        # 有干净走廊时不用它；实在没有才退让（原来就是这个行为）
+                        oc = sum(_ov(tuple(p), tuple(q), r, t_)
+                                 for p, q in zip(cand, cand[1:])
+                                 for nm, r, t_ in used_segs if nm != job["name"])
+                        if fb_cost is None or oc < fb_cost:
+                            fallback, fb_cost, fb_why = cand, oc, clash
                         continue
-                    cost = sum(_ov(tuple(p), tuple(q), r, t_)
-                               for p, q in zip(cand, cand[1:])
-                               for nm, r, t_ in used_segs if nm != job["name"])
+                    cost = crossings_of(cand, job["name"]) * 3.0 + length_of(cand) * 0.15
                     if best_cost is None or cost < best_cost:
-                        best, best_cost, why = cand, cost, clash
+                        best, best_cost, why = cand, cost, None
+
+                # 第二轮：还是无解就绕外圈。偏移量按**全局引脚范围**算，
+                # 保证一定有一条在内容之外的通道 —— 不能让电路直接画不出来。
+                if best is None and fallback is None:
+                    px = [p[0] for p in all_pins] or [0]
+                    py = [p[1] for p in all_pins] or [0]
+                    rings = []
+                    for edge in (max(py) + 2, min(py) - 2, max(px) + 2, min(px) - 2):
+                        rings += [edge, edge + 1, edge - 1, edge + 2, edge - 2]
+                    if a[2] != 0:                             # 水平出线 → 绕 y
+                        rings = [r - a[1] for r in rings]
+                    else:                                     # 竖直出线 → 绕 x
+                        rings = [r - a[0] for r in rings]
+                    for k in rings:
+                        cand = _route_2pin(a[:2], a[2:], b[:2], b[2:], k=k)
+                        if cand is None:
+                            continue
+                        shared = any(tuple(v) in (r, t_)
+                                     for v in cand
+                                     for nm, r, t_ in used_segs if nm != job["name"])
+                        if shared:
+                            if _DBG:
+                                print(f"[plan] {job['name']} RING k={k} 被 shared 拒: {cand}")
+                            continue
+                        clash = conflicts(cand)
+                        oc = (sum(_ov(tuple(p), tuple(q), r, t_)
+                                  for p, q in zip(cand, cand[1:])
+                                  for nm, r, t_ in used_segs if nm != job["name"])
+                              if clash is not None else 0)
+                        if clash is None:
+                            best, why = cand, None
+                            break
+                        if fb_cost is None or oc < fb_cost:
+                            fallback, fb_cost, fb_why = cand, oc, clash
+            if path is None and best is None and fallback is not None:
+                best, why = fallback, fb_why
             if path is None:
                 if best is None:
                     raise ValueError(f"网 {job['name']} 完全无法走线（无合法正交路径）")
                 path = best
-                OVERLAP_WARN.append(f"{job['name']} 与 {why} 共线（冲突最小的走廊）")
+                if why:
+                    OVERLAP_WARN.append(f"{job['name']} 与 {why} 共线（冲突最小的走廊）")
             claim(job["name"], path)
             out.append({"name": job["name"], "junction": None,
                         "path": path, "pins": [list(p) for p in pins]})
             continue
 
         xs, ys = job["xs"], job["ys"]
+        # 引脚可能落在半格上（0.5 格），range 只吃整数 —— 统一用半格为步长搜索通道
         lo, hi = min(xs) + 1, max(xs) - 1
         ch = None
-        for cand in range(lo, hi + 1):
+        steps = [v / 2.0 for v in range(int(round(lo * 2)), int(round(hi * 2)) + 1)]
+        for cand in steps:
             if any(abs(cand - u) < min_spacing for u in used_ch):
                 continue
             if any(abs(cand - x) < min_spacing for x in set(xs)):
@@ -401,8 +529,11 @@ def plan(netlist, donor, min_spacing=2):
             ch = cand
             break
         if ch is None:
+            # 范围内都不合适：往引脚朝外的一侧继续找
             ch = lo if lo <= hi else min(xs) - 1
-            while any(abs(ch - u) < min_spacing for u in used_ch):
+            for _ in range(64):
+                if not any(abs(ch - u) < min_spacing for u in used_ch):
+                    break
                 ch -= min_spacing
         used_ch.append(ch)
 

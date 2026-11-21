@@ -11,6 +11,7 @@ AI 只需要说清**拓扑**（谁连谁），坐标由这里算出来 —— �
 产物是带坐标的网表，可直接交给 plan_route。
 """
 import collections
+import math
 
 MARGIN_X = 10          # 左边距
 GAP_X = 8              # 列间距（格）
@@ -108,7 +109,7 @@ def _order_layer(layer, preds, succ, pos, rounds=3):
 
 
 def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X, sheet=None,
-          max_per_col=None):
+          max_per_col=None, order=None, stack_series=True):
     """自动布局。
 
     sheet=(宽, 高) 时，会自动收缩间距让整块装进纸里（能装下才缩）。
@@ -145,6 +146,12 @@ def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X, sheet=None,
             gap_y = max(3, min(gap_y, (usable_h - nrow * max_h) // (nrow - 1)))
 
     out = {c["ref"]: dict(c) for c in netlist["components"]}
+    # order：{ref: 序号}，用来强制层内上下顺序（照原图的摆法）。
+    # 不给就按自动的重心排序。
+    if order:
+        for lv in list(by_level):
+            by_level[lv].sort(key=lambda r: order.get(r, 10 ** 6))
+
     # 折列：把一列超过 max_per_col 的部分挪到右边的顺位新列
     columns = []          # [(refs...), ...] 从左到右
     for lv in sorted(by_level):
@@ -158,10 +165,31 @@ def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X, sheet=None,
     # 每列按**自己那一列**的器件尺寸算宽度/行距。
     # 用全局最大值会让一个高器件（数码管）把每一行都撑开，
     # 22 器件的编码器因此拉成 212 格高。
+    # 列间距必须扣掉引脚外伸：7400 的输入脚向外伸 5 格、源器件输出伸 2 格，
+    # 两列之间真正能走线的只有 gap - 7 格。三条网要三根竖干（每根间距 ≥2），
+    # 间距不够时布线器会把通道挤到器件内部 —— 导线就压在引脚线上了。
+    over_r = [max((max(v[0] for v in info[r].values()) for r in col), default=0)
+              for col in columns]
+    over_l = [min((min(v[0] for v in info[r].values()) for r in col), default=0)
+              for col in columns]
+    need_gap = gap_x
+    for i in range(len(columns) - 1):
+        a, b = columns[i], columns[i + 1]
+        crossing = len({n.get("name") for n in netlist.get("nets") or []
+                        if any(p[0] in set(a) for p in n.get("pins") or [])
+                        and any(p[0] in set(b) for p in n.get("pins") or [])})
+        channel = max(4.0, 2.0 * (crossing + 1))     # 每根竖干 2 格 + 余量
+        need_gap = max(need_gap, over_r[i] - over_l[i + 1] + channel)
+    gap_x = need_gap
+
     cursor = margin
     for ci, layer in enumerate(columns):
         col_w = max((max(abs(v[0]) for v in info[r].values()) for r in layer), default=5) * 2 + 2
-        col_h = max((max(abs(v[1]) for v in info[r].values()) for r in layer), default=3) * 2 + 2
+        # 引脚可能带 0.5 偏移（7SEG 的 COM 在 -10.5），列尺寸向上取整，
+        # 否则行距会变成 0.2 这种非半格值，整张图都跟着歪
+        col_w = math.ceil(col_w)
+        col_h = math.ceil(max((max(abs(v[1]) for v in info[r].values())
+                               for r in layer), default=3) * 2 + 2)
         pitch = col_h + gap_y
         n = len(layer)
         span = max(0, n - 1) * pitch
@@ -170,6 +198,28 @@ def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X, sheet=None,
             out[ref]["y"] = int(round(-((span / 2) - i * pitch)))
             out[ref].setdefault("rotation", 0)
         cursor += col_w + gap_x
+
+    # 串联链竖排：R→LED 串起来时，摆成 B 手画那种「输出右拐 → 下探进 R 顶脚 →
+    # R 底脚直落 LED 阳极」。关键是**朝向要对**：
+    #   RES 转 270 → 1 脚在上朝上、2 脚在下朝下
+    #   LED 默认   → A 在上朝上、K 在下朝下
+    # 而且 R 的顶脚必须**低于**驱动脚所在行，否则进线方向会反过来（vendor 会拒）。
+    if stack_series:
+        two_pin = {r for r in out if len(info[r]) == 2}
+        for b in list(two_pin):
+            preds_b = [p for p, outs in edges.items() if b in outs and p in two_pin]
+            if len(preds_b) != 1:
+                continue
+            a = preds_b[0]
+            drivers = [p for p, outs in edges.items() if a in outs and p not in two_pin]
+            if len(drivers) != 1:
+                continue
+            drv = drivers[0]
+            col = out[drv]["x"] + 12
+            out[a]["rotation"] = 270
+            out[a]["x"], out[a]["y"] = col, out[drv]["y"] - 4
+            out[b]["rotation"] = 0
+            out[b]["x"], out[b]["y"] = col, out[a]["y"] - 8
 
     # Proteus 的图纸以页框中心为原点 —— 必须把整体居中，
     # 否则整块会贴到图纸右边（子代实测踩到：7410 骑在右边框上、LED 在图框外）。

@@ -329,6 +329,18 @@ def build_from_topology(netlist, donor, out, verbose=True, max_rounds=4):
         except Exception as exc:               # noqa: BLE001
             report = rev
             say(f"[2.6] 体检跳过：{exc}")
+        # 端点体检：导线必须落在引脚上，不能有悬空或半格偏移
+        try:
+            from .verify import connection as CN
+            cn = CN.check(out)
+            if cn["dangling"]:
+                say(f"[2.8] ⚠ 端点悬空 {len(cn['dangling'])} 个 {cn['dangling'][:3]}")
+            else:
+                say(f"[2.8] 端点全部落在引脚上"
+                    f"（引脚 {cn['ends_on_pin']} / 共端点 {cn['ends_shared']}"
+                    f" / 电源桩 {cn['terminal_stubs']}）")
+        except Exception as exc:               # noqa: BLE001
+            say(f"[2.8] 端点体检跳过：{exc}")
         say(f"[3] 已写出 {out}")
         return {"ok": True, "path": out, "layout": [w, h], "gaps": [gx, gy],
                 "fold": mpc, "verify": d, "netlist": placed, "plan": doc,

@@ -4,7 +4,8 @@
 """
 import re
 
-REF_RE = re.compile(r"^[A-Z][A-Z0-9_]*(?::[A-Z])?$")
+# vendor 要求位号里必须含数字（LS_A 会被拒），这里对齐，别等写到一半才报
+REF_RE = re.compile(r"^[A-Z][A-Z0-9_]*\d[A-Z0-9_]*(?::[A-Z])?$")
 
 
 def validate(netlist, donor):
@@ -23,7 +24,26 @@ def validate(netlist, donor):
 
     # 只给拓扑（没 x/y）时不做引脚级校验 —— 坐标还没算，校验会 KeyError('x')，
     # 而被误报成 DONOR_MISSING_DEVICE，误导性极强。
+    # 星形结点只支持 2~4 根线 → 一条网最多 4 个引脚。
+    # 超了 vendor 会抛 "Each native junction needs two to four wires"，很难懂。
+    from .pipeline import SUPPLY_KIND
+    for n in netlist.get("nets") or []:
+        pins = n.get("pins") or []
+        if (n.get("name") or "").upper() in SUPPLY_KIND:
+            continue                   # 电源网后面会拆成端子，不受四脚限制
+        if len(pins) > 4:
+            errs.append({"code": E.Code.NETLIST_INVALID,
+                         "message": f"网 {n.get('name')} 有 {len(pins)} 个引脚，"
+                                    f"星形结点最多 4 个；请拆成两级（加缓冲门）"})
+
     topology_only = any("x" not in c or "y" not in c for c in comps)
+    # 位号规则在拓扑阶段就要查：vendor 写文件时才拒（要求含数字），
+    # 等画完再报就白干了。
+    bad_refs = [c.get("ref") for c in comps if not REF_RE.match(c.get("ref", ""))]
+    if bad_refs:
+        errs.append({"code": E.Code.REF_INVALID,
+                     "message": f"位号不合规: {bad_refs}"
+                                f"（必须字母开头且含数字，如 LS1 / U1:D / R14）"})
     if topology_only:
         missing = [c.get("ref") for c in comps if "device" not in c]
         if missing:
@@ -35,9 +55,18 @@ def validate(netlist, donor):
             except Exception:
                 return E.fail(E.Code.DONOR_MISSING_DEVICE,
                               f"donor 里没有 {c['device']}（{c.get('ref')}）")
+        if errs:                      # 拓扑阶段已经能判出来的问题不能吞掉
+            return E.fail(E.Code.NETLIST_INVALID, f"{len(errs)} 处问题", errors=errs)
         return E.ok(topology=True, components=len(comps),
                     nets=len(netlist.get("nets") or []),
                     note="只给了拓扑，坐标由自动布局生成；引脚级校验在布局之后做")
+
+    # 位号规则在**拓扑阶段**就要查：vendor 写文件时会拒（要求含数字），
+    # 等画完再报就白干了。
+    bad_refs = [c.get("ref") for c in comps if not REF_RE.match(c.get("ref", ""))]
+    if bad_refs:
+        return E.fail(E.Code.REF_INVALID,
+                      f"位号不合规: {bad_refs}（必须字母开头且含数字，如 LS1 / U1:D / R14）")
 
     try:
         tips = P.pin_table(netlist, donor)
