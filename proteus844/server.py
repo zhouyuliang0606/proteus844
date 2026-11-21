@@ -61,6 +61,11 @@ TOOLS = [
                          "pins": {"type": "array", "description": "[{ref,pin,tip:[x,y]}]"},
                          "boxes": {"type": "array", "description": "器件本体包围盒 [[x0,y0,x1,y1]]"},
                          "tol": {"type": "number", "default": 2.5}}}},
+    {"name": "review_layout",
+     "description": "体检画图美观度：是否居中、是否装得下、绕线系数、跨网共线。返回 0~100 观感分。",
+     "inputSchema": {"type": "object", "properties": {
+         "project": {"type": "string"},
+         "donor": {"type": "string"}}, "required": ["project"]}},
     {"name": "check_overlap", "description": "查共线重叠（含网络归属）。只作可读性提示，不是对错判据。",
      "inputSchema": {"type": "object", "required": ["project"],
                      "properties": {"project": {"type": "string"}}}},
@@ -222,6 +227,12 @@ def _trace(args):
                 pieces=res["pieces"], nodes=res["nodes"])
 
 
+def _review_layout(args):
+    from proteus844 import beautify as B
+    r = B.review_project(args["project"], args.get("donor"))
+    return E.ok(**r, text=B.format_review(r))
+
+
 def _check_overlap(args):
     from proteus844.verify import overlap as O
     segs, nwire = O.load(args["project"])
@@ -330,7 +341,7 @@ HANDLERS = {
     "donor_info": _donor_info, "symbol_table": _symbol_table,
     "recognize_segments": _segments, "recognize_junctions": _junctions,
     "validate_netlist": _validate, "plan_route": _plan, "build": _build,
-    "trace": _trace, "check_overlap": _check_overlap,
+    "trace": _trace, "review_layout": _review_layout, "check_overlap": _check_overlap,
     "build_topology": _build_topology,
     "pin_hints": _pin_hints,
     "check_against_image": _check_against_image,

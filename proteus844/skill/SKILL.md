@@ -363,6 +363,45 @@ pipeline.build_from_topology(...)       # Python
 
 截图也要省着用：**裁局部放大**看关键区域，不要整屏读大图。
 
+## 3.6 画图美观（beautify）
+
+**布局只决定"信号从左到右"，不决定"整块摆在纸的哪"。** 这一步单独做。
+
+```python
+from proteus844 import beautify as B
+B.center(doc, donor)                       # 设计完 → 摆到图纸正中
+r = B.review(doc, donor, sheet=(132, 70))  # 体检
+print(B.format_review(r))
+```
+
+**对已经写好的工程也能体检**：
+
+```bash
+python -m proteus844.cli review out.pdsprj --donor donors/base.pdsprj
+```
+
+四项指标（`review()` 返回同名字段）：
+
+| 字段 | 判断标准 |
+|---|---|
+| r["offset"] | 应在 ±1 格内。超了说明没居中 |
+| r["margins"] | 四边留白，任一为负 = 越出图框 |
+| r["detour_ratio"] | 实际线长 ÷ 最短需求。<1.3 好，>1.8 绕远 |
+| r["cross_net_overlaps"] | 跨网共线处数，看着像连在一起 |
+
+r["score"] 是 0~100 的综合分，**只用于横向比较两版哪版更好**，不是绝对标准。
+
+### 摆不下怎么办
+
+`place()` 有三个旋钮，`build_from_topology` 会自动组合试一遍取最高分：
+
+- `sheet=(132,70)` → 自动收缩间距，能装下才缩
+- `max_per_col=6` → 一列超过 6 个就折到右边新列（20+ 器件必须用）
+- `gap_x / gap_y` → 显式间距
+
+**关键坑**：行距若取全局最大器件高度，一个高器件（数码管）会把每一行都撑开，
+22 器件因此拉成 212 格高。现在按**每列自己**的器件尺寸算。
+
 ## 4. 验收（顺序不能改）
 
 | # | 工具 | 判定 |

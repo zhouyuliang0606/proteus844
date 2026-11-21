@@ -61,7 +61,9 @@ python -m proteus844.selftest
   要精确控制就自己给坐标，再 `plan_route` → `build`。
 - **验证**：在 Proteus 里「工具 → 编译网络表」导出 SDF，
   用 `python -m proteus844.verify.netdiff <意图网表> <SDF>` 逐条比。
-- **看**：截图，检查器件有没有重叠、线有没有斜的/绕远路、整块有没有越出页框。
+- **看**：`python -m proteus844.cli review <工程> --donor <donor>` 会给出
+  偏移 / 留白 / 绕线系数 / 跨网共线 / 观感分；分数低就调布局再跑。
+  只有最后确认才截图（裁局部看，别整屏读大图）。
 
 ## 图纸坐标这件事（最容易翻车）
 

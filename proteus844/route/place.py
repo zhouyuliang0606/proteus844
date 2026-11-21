@@ -107,7 +107,14 @@ def _order_layer(layer, preds, succ, pos, rounds=3):
     return layer
 
 
-def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X):
+def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X, sheet=None,
+          max_per_col=None):
+    """自动布局。
+
+    sheet=(宽, 高) 时，会自动收缩间距让整块装进纸里（能装下才缩）。
+    max_per_col 给定时，一列超过这么多个就折到右边新开一列 ——
+    20+ 器件的电路不折列会拉成一条 200 多格高的面条。
+    """
     """返回带坐标的新网表（不改原对象）"""
     refs, info, edges, _ = build_graph(netlist, donor)
     level, preds = levels_of(refs, edges)
@@ -126,18 +133,43 @@ def place(netlist, donor, gap_x=GAP_X, gap_y=GAP_Y, margin=MARGIN_X):
     for lv in sorted(by_level):
         by_level[lv] = _order_layer(by_level[lv], preds, succ, pos)
 
+    # 想装进纸里就先收缩间距（只在真的能装下时才缩，缩到 3 格为止）
+    if sheet:
+        ncol = len(by_level)
+        nrow = max((len(v) for v in by_level.values()), default=1)
+        usable_w = sheet[0] - 2 * margin
+        usable_h = sheet[1] - 2 * margin
+        if ncol > 1:
+            gap_x = max(3, min(gap_x, (usable_w - ncol * max_w) // (ncol - 1)))
+        if nrow > 1:
+            gap_y = max(3, min(gap_y, (usable_h - nrow * max_h) // (nrow - 1)))
+
     out = {c["ref"]: dict(c) for c in netlist["components"]}
+    # 折列：把一列超过 max_per_col 的部分挪到右边的顺位新列
+    columns = []          # [(refs...), ...] 从左到右
     for lv in sorted(by_level):
         layer = by_level[lv]
+        if max_per_col and len(layer) > max_per_col:
+            for i in range(0, len(layer), max_per_col):
+                columns.append(layer[i:i + max_per_col])
+        else:
+            columns.append(layer)
+
+    # 每列按**自己那一列**的器件尺寸算宽度/行距。
+    # 用全局最大值会让一个高器件（数码管）把每一行都撑开，
+    # 22 器件的编码器因此拉成 212 格高。
+    cursor = margin
+    for ci, layer in enumerate(columns):
+        col_w = max((max(abs(v[0]) for v in info[r].values()) for r in layer), default=5) * 2 + 2
+        col_h = max((max(abs(v[1]) for v in info[r].values()) for r in layer), default=3) * 2 + 2
+        pitch = col_h + gap_y
         n = len(layer)
+        span = max(0, n - 1) * pitch
         for i, ref in enumerate(layer):
-            x = margin + lv * (max_w + gap_x)
-            # 竖直方向按层内序号居中排布
-            span = max(0, n - 1) * (max_h + gap_y)
-            y = -((span / 2) - i * (max_h + gap_y))
-            out[ref]["x"] = int(round(x))
-            out[ref]["y"] = int(round(y))
+            out[ref]["x"] = int(round(cursor))
+            out[ref]["y"] = int(round(-((span / 2) - i * pitch)))
             out[ref].setdefault("rotation", 0)
+        cursor += col_w + gap_x
 
     # Proteus 的图纸以页框中心为原点 —— 必须把整体居中，
     # 否则整块会贴到图纸右边（子代实测踩到：7410 骑在右边框上、LED 在图框外）。

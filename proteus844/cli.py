@@ -31,6 +31,14 @@ def _ink(path, scale=1, threshold=140):
     return (a < 140), (a.shape[1] / scale, a.shape[0] / scale)
 
 
+def cmd_review(args):
+    """体检一张画好的图：居不居中、装不装得下、绕不绕、有没有跨网共线。"""
+    from proteus844 import beautify as B
+    r = B.review_project(args.project, args.donor)
+    print(B.format_review(r))
+    return 0 if r.get("ok") else 1
+
+
 def cmd_seg(args):
     from recognize import segments as S
     ink, _ = _ink(args.image, threshold=getattr(args, "threshold", 140))
@@ -235,6 +243,11 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="proteus844", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("review", help="体检：居中/装得下/绕线/共线")
+    p.add_argument("project")
+    p.add_argument("--donor", default=None, help="供体工程，用于精确估算符号占位")
+    p.set_defaults(func=cmd_review)
 
     p = sub.add_parser("seg"); p.add_argument("image")
     p.add_argument("--min-len", type=int, default=12)

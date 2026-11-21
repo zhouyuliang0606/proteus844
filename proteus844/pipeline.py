@@ -277,35 +277,64 @@ def build_from_topology(netlist, donor, out, verbose=True, max_rounds=4):
     say(f"[1] 拓扑：{len(nl['components'])} 器件 / {len(nl['nets'])} 信号网"
         f" + {len(nl['terminals'])} 电源端子")
 
-    gaps = [(8, 6), (12, 10), (16, 14), (20, 18), (26, 22)]
+    # 试几种摆法，按观感分择优 —— "画得好不好"由 beautify 打分，
+    # 而不是"能走通就交差"。
+    from . import beautify as B
+    configs = []
+    for mpc in (None, 6, 5, 4):
+        for gx, gy in ((8, 6), (10, 8)):
+            configs.append((mpc, gx, gy))
+    configs = configs[:max(1, max_rounds)]
+
+    best = None          # (score, placed, doc, review, layout)
     last = None
-    for i, (gx, gy) in enumerate(gaps[:max_rounds]):
-        placed = PL.place(nl, donor, gap_x=gx, gap_y=gy)
+    for mpc, gx, gy in configs:
+        placed = PL.place(nl, donor, gap_x=gx, gap_y=gy, sheet=(132.0, 70.0),
+                          max_per_col=mpc)
         xs = [c["x"] for c in placed["components"]]
         ys = [c["y"] for c in placed["components"]]
         w, h = max(xs) - min(xs), max(ys) - min(ys)
         try:
             doc = RP.plan(placed, donor)
-            writer.build(placed, doc, donor, out)
+            B.center(doc, donor)                  # 设计完 → 摆到图纸正中
         except Exception as exc:                       # noqa: BLE001
-            say(f"[2] 间距 {gx}/{gy} 布局 {w}×{h} 失败：{type(exc).__name__}: {str(exc)[:60]}")
+            say(f"[2] 折列 {mpc} 间距 {gx}/{gy} 布局 {w}×{h} 失败：{str(exc)[:50]}")
             last = exc
             continue
-        d = F.diff(nl, out)
-        say(f"[2] 间距 {gx}/{gy} 布局 {w}×{h} → 验收 {d['summary']}")
-        if d["ok"]:
-            try:
-                from .verify import sheet as SH
-                sh = SH.fit_to_content(out)
-                say(f"[2.5] 图纸调到 {sh['to'][0]}×{sh['to'][1]} 格")
-            except Exception as exc:               # noqa: BLE001
-                say(f"[2.5] 图纸调整跳过：{exc}")
-            say(f"[3] 已写出 {out}")
-            return {"ok": True, "path": out, "layout": [w, h], "gaps": [gx, gy],
-                    "verify": d, "netlist": placed, "plan": doc, "log": log}
-        last = ValueError(str(d["summary"]))
-    say(f"[2] 所有间距都失败：{last}")
-    return {"ok": False, "stage": "place", "error": str(last), "log": log}
+        rev = B.review(doc, donor, sheet=(132.0, 70.0))
+        say(f"[2] 折列 {mpc} 间距 {gx}/{gy} → {w}×{h} 格，观感 {rev['score']}/100"
+            f"{'，问题：' + '；'.join(rev['problems']) if rev['problems'] else ''}")
+        if best is None or rev["score"] > best[0]:
+            best = (rev["score"], placed, doc, rev, (w, h), (mpc, gx, gy))
+
+    if best is None:
+        say(f"[2] 所有摆法都失败：{last}")
+        return {"ok": False, "stage": "place", "error": str(last), "log": log}
+
+    score, placed, doc, rev, (w, h), (mpc, gx, gy) = best
+    writer.build(placed, doc, donor, out)
+    d = F.diff(nl, out)
+    say(f"[2.7] 采用折列 {mpc} 间距 {gx}/{gy}（观感 {score}/100）→ 验收 {d['summary']}")
+    if d["ok"]:
+        try:
+            from .verify import sheet as SH
+            sh = SH.fit_to_content(out)
+            say(f"[2.5] 图纸调到 {sh['to'][0]}×{sh['to'][1]} 格")
+        except Exception as exc:               # noqa: BLE001
+            say(f"[2.5] 图纸调整跳过：{exc}")
+        try:
+            report = B.review_project(out, donor)
+            for line in B.format_review(report).splitlines():
+                say(f"[2.6] {line}")
+        except Exception as exc:               # noqa: BLE001
+            report = rev
+            say(f"[2.6] 体检跳过：{exc}")
+        say(f"[3] 已写出 {out}")
+        return {"ok": True, "path": out, "layout": [w, h], "gaps": [gx, gy],
+                "fold": mpc, "verify": d, "netlist": placed, "plan": doc,
+                "log": log, "review": report}
+    say(f"[2] 最优摆法验收不通过：{d['summary']}")
+    return {"ok": False, "stage": "verify", "error": str(d["summary"]), "log": log}
 
 
 def estimate_ppg(components, donor):
