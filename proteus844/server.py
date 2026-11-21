@@ -61,6 +61,10 @@ TOOLS = [
                          "pins": {"type": "array", "description": "[{ref,pin,tip:[x,y]}]"},
                          "boxes": {"type": "array", "description": "器件本体包围盒 [[x0,y0,x1,y1]]"},
                          "tol": {"type": "number", "default": 2.5}}}},
+    {"name": "probe_project",
+     "description": "探测 .pdsprj 的 Proteus 版本（RELEASE/FILEVER/CDB）并判断本工具是否支持。",
+     "inputSchema": {"type": "object", "properties": {
+         "project": {"type": "string"}}, "required": ["project"]}},
     {"name": "review_layout",
      "description": "体检画图美观度：是否居中、是否装得下、绕线系数、跨网共线。返回 0~100 观感分。",
      "inputSchema": {"type": "object", "properties": {
@@ -227,6 +231,12 @@ def _trace(args):
                 pieces=res["pieces"], nodes=res["nodes"])
 
 
+def _probe_project(args):
+    from proteus844 import version as V
+    d = V.detect(args["project"])
+    return E.ok(**d, text=V.format_probe(d))
+
+
 def _review_layout(args):
     from proteus844 import beautify as B
     r = B.review_project(args["project"], args.get("donor"))
@@ -341,7 +351,7 @@ HANDLERS = {
     "donor_info": _donor_info, "symbol_table": _symbol_table,
     "recognize_segments": _segments, "recognize_junctions": _junctions,
     "validate_netlist": _validate, "plan_route": _plan, "build": _build,
-    "trace": _trace, "review_layout": _review_layout, "check_overlap": _check_overlap,
+    "trace": _trace, "probe_project": _probe_project, "review_layout": _review_layout, "check_overlap": _check_overlap,
     "build_topology": _build_topology,
     "pin_hints": _pin_hints,
     "check_against_image": _check_against_image,

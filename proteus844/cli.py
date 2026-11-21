@@ -31,6 +31,14 @@ def _ink(path, scale=1, threshold=140):
     return (a < 140), (a.shape[1] / scale, a.shape[0] / scale)
 
 
+def cmd_probe(args):
+    """这个工程是哪个 Proteus 版本？本工具支不支持？"""
+    from proteus844 import version as V
+    d = V.detect(args.project)
+    print(V.format_probe(d))
+    return 0 if d["supported"] else 1
+
+
 def cmd_review(args):
     """体检一张画好的图：居不居中、装不装得下、绕不绕、有没有跨网共线。"""
     from proteus844 import beautify as B
@@ -243,6 +251,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="proteus844", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("probe", help="探测工程版本（FILEVER/RELEASE/CDB）")
+    p.add_argument("project")
+    p.set_defaults(func=cmd_probe)
 
     p = sub.add_parser("review", help="体检：居中/装得下/绕线/共线")
     p.add_argument("project")

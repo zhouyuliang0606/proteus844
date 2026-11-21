@@ -605,3 +605,68 @@ $hkl = [KB]::LoadKeyboardLayout("00000409", 1)
 
 
 **⑥ proteus_erc 的路径必须以 .SDF 结尾** —— 传别的后缀它按扩展名找文件，会报「网络表没有生成」。
+
+## 8. 加一个新的 Proteus 版本
+
+### 先判断要不要做
+
+```bash
+python -m proteus844.cli probe 你的工程.pdsprj
+```
+
+支持矩阵（见 proteus844/version.py 顶部的 SUPPORTED）：
+
+| RELEASE | FILEVER | 状态 |
+|---|---|---|
+| 814 | 840 | 上游已验证 |
+| 815 | 844 | 本项目逆向补上 |
+| 816 | 847 | 上游已验证 |
+| 其它 | 其它 | **未验证** |
+
+`probe` 会打印 RELEASE / FILEVER / CDB 版本 / DSN 大小 / 成员列表。
+**拿到一个新版本，第一件事就是跑它**，别直接开画。
+
+### 版本差异在哪（按影响从大到小）
+
+1. **`component_codec.py` 的 TIMESTAMP 断言**
+   `FILEVER in ("840","847")` —— 加新版本第一步就是把它加进去。
+2. **器件记录的零标志字节数**
+   844 起，显示器/开关这类器件**不保留 9 个零字节**（见 `component_codec.py` 里的 844 注释）。
+   这是 8.15 适配时最大的坑。
+3. **实体表定位方式**
+   844 的头布局和 847 不同，靠 `proteus_project.py` 里按特征串定位实体表，而不是固定偏移。
+4. **CDB 版本**
+   目前都是 v7。若新版变成 v8，器件引脚名表要重解。
+
+### 具体步骤
+
+```bash
+# 1) 新版本里存一个只含目标器件的工程，当 donor
+python -m proteus844.cli probe new.pdsprj          # 确认 FILEVER
+python -m proteus844.symbol_table new.pdsprj       # 能读出器件表就说明解析通了
+
+# 2) 解析不通 → 改 vendor 里的断言/分支，再跑一次 symbol_table
+#    改完必须记进 NOTICE（这是第三方代码）
+
+# 3) 用最简单的两器件电路试写
+python -m proteus844.cli assemble comps.json nets.json out.pdsprj --donor new.pdsprj
+
+# 4) 在 Proteus 里打开 → 编译网络表 → 比 SDF
+python -m proteus844.verify.netdiff nets.json out.SDF
+
+# 5) 回归，确认没把老版本改坏
+python -m proteus844.tests.regression
+```
+
+### 绝对不要做的事
+
+- **不要用"未知版本能不能打开"来判断兼容** —— 能打开不代表写入布局正确。
+- **不要跳过 SDF** —— 文件级验收是自证的，只有 Proteus 编译出来的网表能作证。
+- **不要改完不记 NOTICE** —— vendor/ref844 目录是 MIT 第三方代码，改了什么必须写明。
+
+### 8.17 / 未来版本
+
+公开的开源实现（proteus-automatic-api 0.2.0，本项目的 vendor 来源）只到 **847（8.16）**，
+没有任何 8.17 的支持。要支持就得自己逆向 —— 上面那五步就是流程，
+其中第 2 步（零标志字节 / 实体表定位）是主要工作量。
+

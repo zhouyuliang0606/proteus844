@@ -56,6 +56,8 @@ def main():
     md = "--md" in sys.argv
     donors = args or DEFAULT_DONORS
     for donor in donors:
+        from . import version as V
+        V.guard(donor)
         t = table(donor)
         print(f"\n### {donor}\n")
         if md:
@@ -88,4 +90,6 @@ if __name__ == "__main__":
     donors = args or DEFAULT_DONORS
     want_md = "--md" in sys.argv
     for d in donors:
+        from . import version as V
+        V.guard(d)                      # 版本不支持就给人话，别抛 traceback
         print(table(d) if not want_md else table(d))
