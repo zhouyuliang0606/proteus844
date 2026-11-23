@@ -14,10 +14,38 @@
 
 | | |
 |---|---|
-| 本工具 | **v1.0.0** |
+| 本工具 | **v1.1.0** |
 | 实测 Proteus | **8.15，FILEVER 844** |
 | 代码层面支持 | FILEVER **840 / 844 / 847**（三套模板布局都有分支） |
 | 实测电路 | 图 1.1 组合逻辑（9 器件）、74LS147 编码器（22 器件） |
+
+### v1.1.0 改了什么
+
+**布线层（`route/`）**
+- 导线不再压着引脚线走（引脚内侧设为禁行区，实测 6 处 → 0）
+- 列间距按引脚外伸量 + 穿网数计算 —— 之前 7400 输入脚外伸 5 格、
+  源输出 2 格，中间只剩 2 格通道，三条网挤不下会被推到器件内部
+- 走廊按「交叉×3 + 线长×0.15」择优
+- 修掉 80 个随机电路里 12 个「完全无法走线」
+- 串联链竖排：`RES` 转 270（1 脚在上、朝上），R 底脚直落 LED 阳极
+
+**美观（`beautify/` 新模块）**
+- `center()`：按器件本体 + 导线的真实外框整格平移，摆到图纸正中
+- `review()`：偏移 / 留白 / 绕线系数 / 跨网共线 + **0~100 观感分**
+- 命令行：`python -m proteus844.cli review 工程.pdsprj --donor donors/base.pdsprj`
+
+**校验（`verify/connection.py` 新模块）**
+- 导线端点分四类：落在引脚 / 与别的线共端点 / 电源端子桩 / **悬空**
+- 修掉旋转器件被误报悬空的双重旋转问题
+
+**版本（`version.py` 新模块）**
+- `python -m proteus844.cli probe 工程.pdsprj` → RELEASE / FILEVER / CDB 版本
+- 未知版本给可操作提示，不再抛原始 traceback
+
+**其它**
+- `writer` 支持 `label_offsets`（竖放电阻的数值不再压在器件上）
+- `validate` 提前拦：位号必须含数字、单网最多 4 脚（星形结点上限）
+- `cli assemble` 保留 `terminals`（原来硬写成 `[]`，GND 会丢）
 
 ### 版本兼容性怎么判断
 
@@ -208,17 +236,25 @@ python -m proteus844.cli review out.pdsprj --donor donors/base.pdsprj
 proteus844/
   BRIEF.md      给别人/子代理用的自足任务书（一句话派活）
   README.md     本文件
-  cli.py  server.py  pipeline.py  selftest.py
+  cli.py  server.py  pipeline.py  selftest.py  version.py
   recognize/    图片 → 线段 / 结点 / 引脚提示
   netlist/      线段 → 网表
-  route/        布局(place/template) / 布线(plan)
-  build/        写 .pdsprj
-  verify/       SDF / 文件 / 结构 / 截图 / 图纸 / 初筛
+  route/        布局(place/template) / 布线(plan) / 度量(metrics)
+  beautify/     居中 / 观感体检 / 评分（v1.1 新增）
+  build/        写 .pdsprj（wirelabel 是失败尝试，已禁用）
+  verify/       SDF / 文件 / 结构 / 截图 / 图纸 / 初筛 / 端点(connection)
   skill/SKILL.md  作业手册（所有踩过的坑都在这）
   donors/       供体工程（器件模板来源）
   tests/        回归 + 用例
   experiments/  走不通的路（负面记录）
 ```
+
+## 已知的坑（都写在 SKILL 里，这里只列最要命的）
+
+- **连线标号（A/B/C）写不了** —— 手工拼字节会让工程损坏，SKILL §3.8
+- **电源/地端子必须显式声明**，否则那根脚是孤立单脚网，SKILL §3.10
+- **引脚不一定在整格上**（7SEG 的 COM 在 -10.5 格），别自己取整，SKILL §3.6
+- **一列器件太多要折列**，否则拉成面条，SKILL §3.4
 
 ## 许可
 
